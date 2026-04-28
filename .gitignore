@@ -1,0 +1,19 @@
+# Dataset
+Dataset/
+
+# Model weights
+models/*.pth
+models/*.pt
+
+# Outputs
+outputs/*.png
+outputs/*.csv
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Environment
+.env
+venv/
