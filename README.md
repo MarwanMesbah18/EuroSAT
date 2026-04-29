@@ -24,13 +24,27 @@ Images are 64x64 pixel RGB JPEGs derived from Sentinel-2 multispectral satellite
 
 ## Model Architecture
 
-ResNet50 with transfer learning from ImageNet (IMAGENET1K_V2 weights). The final fully connected layer is replaced with a custom 2-layer classification head:
+ResNet50 implemented from scratch — every layer built manually using `nn.Conv2d`, `nn.BatchNorm2d`, `nn.ReLU`. No pretrained weights.
 
+**Bottleneck block** (3-layer residual block):
 ```
-ResNet50 backbone (pretrained) → Dropout(0.3) → Linear(2048, 512) → ReLU → Dropout(0.2) → Linear(512, 10)
+1x1 Conv → BN → ReLU    (reduce channels)
+3x3 Conv → BN → ReLU    (spatial features)
+1x1 Conv → BN            (expand channels x4)
++ skip connection        → ReLU
 ```
 
-All layers are fine-tuned. Input images are resized from 64x64 to 224x224.
+**Full network:**
+```
+Stem:  Conv2d(3→64, 7x7) → BN → ReLU → MaxPool(3x3)
+Layer1: 3 Bottleneck blocks  (64 → 256 channels)
+Layer2: 4 Bottleneck blocks  (128 → 512 channels)
+Layer3: 6 Bottleneck blocks  (256 → 1024 channels)
+Layer4: 3 Bottleneck blocks  (512 → 2048 channels)
+Head:   AdaptiveAvgPool → Linear(2048, 10)
+```
+
+Weights initialized with Kaiming initialization. Input images resized from 64x64 to 224x224.
 
 ## Setup
 
@@ -57,14 +71,14 @@ Set `DATA_DIR` in the notebook to `./Dataset/EuroSAT_RGB/`.
 | Parameter | Value |
 |---|---|
 | Batch size | 64 |
-| Learning rate | 1e-3 |
+| Learning rate | 3e-4 |
 | Optimizer | AdamW |
 | Scheduler | CosineAnnealingLR |
-| Epochs | 30 |
+| Epochs | 100 |
 | Weight decay | 1e-4 |
 | Mixed precision | Yes (AMP) |
 | Split ratio | 70 / 15 / 15 (train/val/test) |
-| Early stopping | Patience = 7 |
+| Early stopping | Patience = 12 |
 
 ## Data Augmentation
 
@@ -82,7 +96,7 @@ Results will be filled in after training.
 | Macro F1-Score | — |
 | Weighted F1-Score | — |
 
-Expected accuracy range: 95–98% based on published benchmarks.
+Expected accuracy range: 90–95% when training from scratch.
 
 ## Project Structure
 
