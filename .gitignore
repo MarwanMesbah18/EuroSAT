@@ -4,10 +4,7 @@ Dataset/
 # Model weights
 models/*.pth
 models/*.pt
-
-# Outputs
-outputs/*.png
-outputs/*.csv
+outputs/*.pth
 
 # Python
 __pycache__/
