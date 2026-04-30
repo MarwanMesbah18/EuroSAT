@@ -35,3 +35,20 @@
   - ~23.5M parameters matches expected ResNet50 count
   - Training pipeline (AMP, cosine annealing, checkpointing) is solid
   - 97.65% test accuracy from scratch is an excellent result
+
+---
+
+## Fixes Applied to `eurosat_resnet50.ipynb`
+
+| Cell | Fix | Why |
+|------|-----|-----|
+| **cell-0** | "transfer learning" → "implemented from scratch" | Factual error — no pretrained weights used |
+| **cell-2** | `cudnn.benchmark = True`, `deterministic = False` | Fixed 224x224 input size makes autotuning safe; gains ~5-15% throughput |
+| **cell-4** | Removed `import torchvision` | Dead import — submodules already imported separately |
+| **cell-6** | Compute **dataset-specific** mean/std instead of ImageNet defaults | Model trains from scratch — no reason to use ImageNet stats on satellite imagery. Uses exact two-pass formula (`E[X²] - E[X]²`) over resized images |
+| **cell-7** | Fixed split: `val_end = train_end + int(VAL_SPLIT * ...)` + remainder to test; removed redundant `test_dataset` | Prevents silent sample loss with non-round sizes; eliminates duplicate `ImageFolder` walk |
+| **cell-9** | `np.bincount(full_dataset.targets)` | Instant vs. iterating 27K PIL image loads just to count labels |
+| **cell-10** | Dynamic `inv_normalize` from computed stats + explanatory comment | Stays in sync with the normalization values automatically |
+| **cell-16** | `best_val_acc = -1.0` (was `0.0`) | Guarantees first epoch always saves weights, even if val_acc == 0.0 |
+| **cell-20** | Added `if best_model_wts is not None` guard | Prevents crash if training is interrupted before any epoch completes |
+| **cell-28** | Renamed `resnet50_eurosat_final.pth` → `resnet50_eurosat_best.pth` | Name now accurately reflects that it saves the best weights, not the final epoch |
