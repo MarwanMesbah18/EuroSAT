@@ -106,6 +106,8 @@ Input x ────────────────────────
 ```
 
 **Why it works:** If the optimal transformation is close to identity, the network just needs to push F(x) toward zero — much easier than learning identity from scratch. Skip connections also create "information highways" for gradient flow, preventing vanishing gradients in 50+ layer networks.
+
+![ResNet Architecture](../photos/restnett.png)
 """)
 
 arch_bottleneck = md("""---
