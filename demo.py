@@ -125,60 +125,71 @@ def predict(image):
 st.set_page_config(page_title="EuroSAT Classifier", page_icon="🛰️", layout="wide")
 
 st.title("EuroSAT Land Use Classifier")
-st.caption("ResNet50 built from scratch · 97.28% accuracy · 10 land use classes")
+st.caption("ResNet50 built from scratch · 97.65% accuracy · 10 land use classes")
 
-col1, col2 = st.columns([1, 1])
+# --- Image selection (full width, top) ---
 
-with col1:
-    st.subheader("Upload a satellite image")
-    uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
+tab_upload, tab_test, tab_dataset = st.tabs(["Upload Image", "Test Images", "Dataset Samples"])
 
+with tab_upload:
+    uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"], label_visibility="collapsed")
     if uploaded_file is not None:
-        image = Image.open(uploaded_file)
-        st.image(image, caption="Uploaded Image", use_container_width=True)
+        st.image(Image.open(uploaded_file), caption="Uploaded Image", use_container_width=True)
 
-    st.subheader("Or pick from test images")
+with tab_test:
     test_dir = os.path.join(BASE_DIR, 'test_images')
     if os.path.isdir(test_dir):
         test_files = sorted([f for f in os.listdir(test_dir)
                              if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
         if test_files:
-            img_cols = st.columns(min(len(test_files), 4))
+            test_cols = st.columns(min(len(test_files), 5))
             for i, fname in enumerate(test_files):
-                with img_cols[i % len(img_cols)]:
+                with test_cols[i % len(test_cols)]:
                     fpath = os.path.join(test_dir, fname)
-                    if st.button(fname, key=f"test_{fname}"):
-                        st.session_state['sample_image'] = Image.open(fpath)
-                        st.session_state.pop('uploaded_image', None)
-            if 'sample_image' in st.session_state and uploaded_file is None:
-                st.image(st.session_state['sample_image'], caption="Selected Test Image", use_container_width=True)
+                    img = Image.open(fpath)
+                    st.image(img, use_container_width=True)
+                    if st.button(f"Select", key=f"test_{fname}"):
+                        st.session_state['selected_image'] = fpath
+                        st.session_state.pop('uploaded_file_key', None)
         else:
-            st.caption("Drop satellite images in test_images/ folder")
+            st.info("Drop satellite images in `test_images/` folder to test on unseen data.")
+    else:
+        st.info("Create a `test_images/` folder and add satellite images.")
 
-    st.divider()
-    st.subheader("Or try a dataset sample")
+with tab_dataset:
     dataset_dir = os.path.join(BASE_DIR, 'Dataset', 'EuroSAT_RGB')
-    sample_cols = st.columns(5)
+    ds_cols = st.columns(5)
     for i, cls in enumerate(CLASS_NAMES):
         cls_dir = os.path.join(dataset_dir, cls)
         if os.path.isdir(cls_dir):
             sample_file = sorted(os.listdir(cls_dir))[0]
             sample_path = os.path.join(cls_dir, sample_file)
-            with sample_cols[i % 5]:
+            with ds_cols[i % 5]:
+                st.image(Image.open(sample_path), use_container_width=True)
                 if st.button(cls, key=cls):
-                    st.session_state['sample_image'] = Image.open(sample_path)
-                    st.session_state.pop('uploaded_image', None)
+                    st.session_state['selected_image'] = sample_path
+                    st.session_state.pop('uploaded_file_key', None)
 
-with col2:
-    st.subheader("Prediction")
-    if uploaded_file is not None or 'sample_image' in st.session_state:
-        if 'sample_image' in st.session_state and uploaded_file is None:
-            img = st.session_state['sample_image']
-        else:
-            img = Image.open(uploaded_file)
+st.divider()
 
+# --- Prediction section (full width, below) ---
+
+# Determine which image to predict on
+img_to_predict = None
+if uploaded_file is not None:
+    img_to_predict = Image.open(uploaded_file)
+elif 'selected_image' in st.session_state:
+    img_to_predict = Image.open(st.session_state['selected_image'])
+
+if img_to_predict is not None:
+    pred_col, table_col = st.columns([1, 2])
+
+    with pred_col:
+        st.image(img_to_predict, caption="Selected Image", use_container_width=True)
+
+    with table_col:
         with st.spinner("Classifying..."):
-            results = predict(img)
+            results = predict(img_to_predict)
 
         sorted_results = sorted(results.items(), key=lambda x: x[1], reverse=True)
         top_class = sorted_results[0][0]
@@ -189,5 +200,5 @@ with col2:
         df = pd.DataFrame(sorted_results, columns=["Class", "Confidence"])
         st.dataframe(df.style.format({"Confidence": "{:.2%}"}).bar(subset=["Confidence"], color="#5f9ea0"),
                      use_container_width=True, hide_index=True)
-    else:
-        st.info("Upload an image or click a sample class to see predictions.")
+else:
+    st.info("Upload an image or select one from the tabs above to see predictions.")
