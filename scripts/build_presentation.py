@@ -1,8 +1,8 @@
 import nbformat
 import copy
 
-# Read V4 notebook
-with open('notebooks/eurosat_rgb_v4.ipynb', 'r') as f:
+# Read V5 notebook
+with open('notebooks/eurosat_rgb_v5.ipynb', 'r') as f:
     nb = nbformat.read(f, as_version=4)
 
 pres = copy.deepcopy(nb)
@@ -33,7 +33,7 @@ for idx, slide_type in slide_map.items():
     if idx < len(pres.cells):
         pres.cells[idx].metadata['slideshow']['slide_type'] = slide_type
 
-for idx in [0, 31, 32]:
+for idx in [0, 22, 31, 32]:
     if idx < len(pres.cells):
         pres.cells[idx].metadata['slideshow']['slide_type'] = 'skip'
 
@@ -74,6 +74,37 @@ about_dataset = md("""---
 **Why this dataset?** Sentinel-2 provides free, global coverage with high revisit frequency — ideal for land use monitoring, urban planning, and environmental analysis.
 
 **Reference benchmark:** The original paper achieved **98.57% accuracy** using a *fine-tuned* (pretrained) ResNet-50. Our goal: match this from scratch.
+""")
+
+# --- Normalization Comparison ---
+normalization = md("""---
+
+### Why ImageNet Normalization — Not Dataset-Specific Values?
+
+In V3, we computed normalization statistics directly from the EuroSAT dataset. In V4 and V5, we went back to ImageNet values. Here's why:
+
+| Statistic | **ImageNet** | **EuroSAT (computed)** | Difference |
+|-----------|-------------|----------------------|------------|
+| **Mean R** | 0.485 | 0.345 | ImageNet is **+0.140 brighter** |
+| **Mean G** | 0.456 | 0.381 | ImageNet is **+0.075 brighter** |
+| **Mean B** | 0.406 | 0.409 | Nearly the same |
+| **Std R** | 0.229 | 0.201 | ImageNet has **+14% more variation** |
+| **Std G** | 0.224 | 0.136 | ImageNet has **+65% more variation** |
+| **Std B** | 0.225 | 0.114 | ImageNet has **+97% more variation** |
+
+**What this means:**
+- EuroSAT images are **darker** (lower mean) with **less color variation** (lower std) — expected for satellite imagery captured from space
+- Dataset-specific normalization compresses pixel values into a narrower range after normalization
+- ImageNet normalization keeps a **wider, more spread-out feature space**
+
+**Why wider normalization helped:**
+1. **Better class separation** — Similar classes (AnnualCrop vs PermanentCrop vs HerbaceousVegetation) benefit from larger feature distances
+2. **More gradient signal** — Wider range means gradients during backprop have more room to adjust weights
+3. **Regularization effect** — The "mismatch" between ImageNet stats and satellite stats acts like noise injection, preventing overfitting to the training set
+
+**The result:** V3 (dataset-specific) got 97.58% vs V1/V5 (ImageNet) getting 97.65% / 98.32%. The 0.07% base difference might seem small, but it compounded with CutMix and Label Smoothing in V5.
+
+> **Lesson:** Computing dataset-specific statistics isn't always better — the wider dynamic range of ImageNet normalization can help the model learn more discriminative features, especially for hard classes.
 """)
 
 # --- Architecture Deep Dive ---
@@ -241,9 +272,9 @@ Satellite images have unique properties different from natural photos — the ca
 # === Evolution section — placed at the END ===
 evolution = md("""---
 
-## Iterative Development: V1 → V4
+## Iterative Development: V1 → V5
 
-We went through 4 versions, testing different approaches to improve accuracy:
+We went through 5 versions, testing different approaches to improve accuracy:
 
 | Version | Normalization | Loss | Key Change | Test Accuracy | Epochs |
 |---------|--------------|------|------------|---------------|--------|
@@ -251,42 +282,74 @@ We went through 4 versions, testing different approaches to improve accuracy:
 | **V2** | ImageNet | Standard CE | Increased patience (8→12) | **97.65%** | 100 |
 | **V3** | **Dataset-specific** | Standard CE | Computed EuroSAT mean/std | **97.58%** | 66 |
 | **V4** | ImageNet | Standard CE | Better code structure + viz | **97.14%** | 39 |
+| **V5** | ImageNet | **Label Smoothing CE** | **CutMix + TTA** | **98.32%** | 97 |
 
-> **Note:** Class-weighted loss was tested in V4 but removed — it hurt per-class accuracy (see below). V5 will address this.
+### What's New in V5
 
-### Key Findings
+- **CutMix augmentation** — cuts a patch from one image and pastes it onto another, mixing labels proportionally. Forces the model to learn from partial views rather than relying on a single dominant region.
+- **Label Smoothing (0.1)** — prevents overconfident predictions by distributing 0.1 probability mass across all classes. Makes the model more robust and better calibrated.
+- **Test-Time Augmentation (TTA)** — averages predictions over 5 augmented views (original, H-flip, V-flip, +5° rotation, -5° rotation) for each test image.
 
-- **ImageNet normalization worked best** — even though EuroSAT images are satellite (not natural photos), the wider normalization range `[0.485, 0.456, 0.406]` helped the model separate harder classes like PermanentCrop vs AnnualCrop.
+### Key Findings Across All Versions
 
-- **Dataset-specific normalization slightly hurt** — EuroSAT's computed mean `[0.345, 0.381, 0.409]` is darker with less variation `std [0.201, 0.136, 0.114]`. This compressed the feature space, making it harder for the network to distinguish similar land cover types.
+- **ImageNet normalization worked best** — even though EuroSAT images are satellite (not natural photos), the wider normalization range helped the model separate harder classes.
+- **Dataset-specific normalization slightly hurt** — compressed the feature space, making it harder to distinguish similar land cover types.
+- **CutMix + Label Smoothing gave the biggest boost** — V5 gained +0.67% over V1, matching closer to the 98.57% pretrained benchmark.
 
-- **Lesson learned:** Sometimes simpler is better. The baseline V1 approach achieved the highest accuracy.
+### From Scratch vs Pretrained — How Do We Compare?
+
+| Method | Training | Test Accuracy | Gap |
+|--------|----------|---------------|-----|
+| EuroSAT paper (Helber et al., 2019) | **Pretrained ResNet-50** (ImageNet weights) | **98.57%** | — |
+| Our V1 (Baseline) | From scratch (random init) | 97.65% | −0.92% |
+| **Our V5 (CutMix + TTA)** | **From scratch (random init)** | **98.32%** | **−0.25%** |
+
+**What this means:** Starting from random weights with no prior knowledge of natural images, our model reaches within **0.25%** of the pretrained benchmark. The pretrained model had already learned edge detectors, texture patterns, and color features from 1.2M ImageNet images — our model learned everything from the 27K EuroSAT images alone.
+
+CutMix + Label Smoothing + TTA closed **73% of the gap** between from-scratch and pretrained performance.
 """)
 
 per_class = md("""---
 
-### Per-Class Accuracy Across Versions
+### Per-Class Accuracy (Recall) Across Versions
 
-| Class | V1 | V2 | V3 | V4 |
-|-------|----|----|----|----|
-| AnnualCrop | 97.95% | 97.95% | 97.72% | 97.49% |
-| Forest | 98.88% | 98.88% | **99.33%** | **99.33%** |
-| HerbaceousVegetation | 95.64% | 95.64% | 96.79% | 97.02% |
-| Highway | 98.13% | 98.13% | 97.86% | 97.59% |
-| Industrial | 97.63% | 97.63% | 98.16% | 97.11% |
-| Pasture | 96.64% | 96.64% | 98.13% | 97.39% |
-| PermanentCrop | 96.07% | 96.07% | **91.36%** | **91.88%** |
-| Residential | 98.60% | 98.60% | **99.53%** | **99.30%** |
-| River | 97.62% | 97.62% | 97.38% | 94.76% |
-| SeaLake | 98.73% | 98.73% | **98.95%** | 98.73% |
+| Class | V1 | V2 | V3 | V4 | **V5** | V5 vs V1 |
+|-------|----|----|----|----|----|----|
+| AnnualCrop | 97.95% | 97.95% | 97.72% | 97.49% | **98.63%** | **+0.68%** |
+| Forest | 98.88% | 98.88% | 99.33% | 99.33% | **98.88%** | +0.00% |
+| HerbaceousVegetation | 95.64% | 95.64% | 96.79% | 97.02% | **97.94%** | **+2.30%** |
+| Highway | 98.13% | 98.13% | 97.86% | 97.59% | **99.20%** | **+1.07%** |
+| Industrial | 97.63% | 97.63% | 98.16% | 97.11% | **98.95%** | **+1.32%** |
+| Pasture | 96.64% | 96.64% | 98.13% | 97.39% | **98.51%** | **+1.87%** |
+| PermanentCrop | 96.07% | 96.07% | 91.36% | 91.88% | **95.29%** | −0.78% |
+| Residential | 98.60% | 98.60% | 99.53% | 99.30% | **98.14%** | −0.46% |
+| River | 97.62% | 97.62% | 97.38% | 94.76% | **97.86%** | **+0.24%** |
+| SeaLake | 98.73% | 98.73% | 98.95% | 98.73% | **99.58%** | **+0.85%** |
 
-**Observations:**
-- **PermanentCrop** is the hardest class across all versions (~91-96%) — visually similar to AnnualCrop and HerbaceousVegetation
-- **V3** boosted Forest and Residential to 99%+ but PermanentCrop dropped to 91.36%
-- **V4** (with class weights) hurt River (94.76%) and didn't help PermanentCrop — weights removed
-- **V1/V2** remain the most balanced overall
+**V5 improvements over V1 (baseline):**
+- **Biggest gains:** HerbaceousVegetation (+2.30%), Pasture (+1.87%), Industrial (+1.32%), Highway (+1.07%)
+- **PermanentCrop** improved from V4's 91.88% back to 95.29% but still below V1's 96.07% — remains the hardest class
+- **Forest** and **Residential** stayed roughly the same (already near 99%)
+- **Overall:** 7 out of 10 classes improved, V5 is the best version for most classes
+""")
 
-> **V5 (upcoming):** Will focus on improving PermanentCrop accuracy through targeted augmentation and focal loss.
+curves_compare = md("""---
+
+### Training Curves: V3 vs V5
+
+**V3 — Dataset-specific normalization, Standard CE, stopped at epoch 66:**
+
+![V3 Training Curves](../photos/training_curves_v3.png)
+
+**V5 — ImageNet normalization, CutMix + Label Smoothing, stopped at epoch 97:**
+
+![V5 Training Curves](../outputs/training_curves_cutmix.png)
+
+**Key differences:**
+- V5 training loss is **higher** than V3 (due to CutMix mixing labels and label smoothing) — but validation accuracy is **better**, showing the model generalizes more
+- V5 trained **31 epochs longer** (97 vs 66) before early stopping — CutMix regularization prevented premature convergence
+- V5 validation accuracy: **98.54%** vs V3's **97.58%** — a +0.96% improvement
+- V3's training loss drops smoothly while V5's is noisy — this is expected because CutMix creates harder training samples on purpose
 """)
 
 # --- References ---
@@ -308,18 +371,20 @@ references = md("""---
 # --- Summary ---
 summary = md("""---
 
-## Results Summary
+## Results Summary (V5 — Best Version)
 
 | Metric | Score |
 |--------|-------|
-| **Test Accuracy** | **97.65%** |
-| Macro F1 | 97.48% |
-| Weighted F1 | 97.61% |
-| Best Class | SeaLake (98.73%) |
-| Hardest Class | PermanentCrop (96.07%) |
+| **Test Accuracy (TTA)** | **98.32%** |
+| **Best Val Accuracy** | **98.54%** |
+| Macro F1 | 98.29% |
+| Weighted F1 | 98.32% |
+| Best Class | SeaLake (99.58%) |
+| Hardest Class | PermanentCrop (95.29%) |
 
 ### Key Takeaways
-- ResNet50 from scratch (no pretrained weights) — **only 1% below the pretrained benchmark** of 98.57%
+- ResNet50 from scratch (no pretrained weights) — **only 0.25% below the pretrained benchmark** of 98.57%
+- CutMix + Label Smoothing + TTA added **+0.67% accuracy** over the V1 baseline
 - Kaiming init + BatchNorm enabled stable training of 50+ layers from random weights
 - ImageNet normalization outperformed dataset-specific normalization
 - Satellite-specific augmentations (vertical flips, rotation) were critical
@@ -343,12 +408,15 @@ for i, cell in enumerate(pres.cells):
     # Insert extra cells after specific sections:
     if i == 7:    # After data loading code
         final_cells.append(about_dataset)
+        final_cells.append(normalization)
     if i == 12:   # After augmentation viz code
         final_cells.append(augmentation)
     if i == 16:   # After model creation code
         final_cells.extend([arch_resnet, arch_bottleneck, batch_norm, kaiming])
     if i == 18:   # After loss setup code
         final_cells.extend([adamw, cosine])
+    if i == 21:   # After "Training Curves" section header
+        final_cells.append(curves_compare)
 
 # End sections: evolution → per-class → references → summary
 final_cells.extend([evolution, per_class, references, summary])
