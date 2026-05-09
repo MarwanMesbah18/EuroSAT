@@ -33,6 +33,10 @@ for idx, slide_type in slide_map.items():
     if idx < len(pres.cells):
         pres.cells[idx].metadata['slideshow']['slide_type'] = slide_type
 
+# === Remove training loop code from cell 20 — keep only the training log output ===
+if len(pres.cells) > 20 and pres.cells[20].cell_type == 'code':
+    pres.cells[20].source = ''
+
 for idx in [0, 22, 31, 32]:
     if idx < len(pres.cells):
         pres.cells[idx].metadata['slideshow']['slide_type'] = 'skip'
